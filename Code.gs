@@ -37,7 +37,7 @@ function getFormObject_(form, items, titles, response) {
       form: form,
       items: items,
       titles: titles,
-      response: response,
+      response: response
     };
   } catch(e) {
     Logger.error(e)
@@ -84,7 +84,7 @@ function addParentAuthorizedAdult_(parentObj, authorizedAdult) {
 
 function toggleNewVisitor_(parentObj) {
   Logger.log('New visitor changed from ' + parentObj.newVisitor + ' to ' + !parentObj.newVisitor);
-  parentObj.newVisitor = parentObj.newVisitor === 0 ? 1 : 0;
+  parentObj.newVisitor = !parentObj.newVisitor;
 }
 
 function createNewParent_(parentName, addr, phone) {
@@ -106,8 +106,27 @@ function getTitleArray_(itemsArray) {
   return titleArray;
 }
 
-function validatePhoneNumber_(phoneNumber) {
+function formatPhoneNumber_(phoneNumber) {
+  Logger.log('Formatting phone number...');
+  var phoneNumberArray = phoneNumber.split('');
+  var length = phoneNumberArray.length;
+  var formattedPhoneNumber = '';
+  for (var i = 0; i < length; i++) {
+    if (phoneNumberArray[i].match(/\d/)) {
+      formattedPhoneNumber += phoneNumberArray[i];
+    }
+  }
+  if (formattedPhoneNumber.length < 10) {
+    Logger.error('Phone number too short, returning -1');
+    return -1;
+  }
+  Logger.log('Phone number successfully formatted.');
+  return formattedPhoneNumber;
+}
 
+function signIn_(parentObj) {
+  var date = Utilities.formatDate(new Date(), 'GMT-6', 'YYYY-MM-DD');
+  var signInSheet = SpreadsheetApp.create('');
 }
 
 function getParentInfoFromSheet_() {
@@ -140,7 +159,7 @@ function getParentInfoFromSheet_() {
   }
   parentObjArray.push(parentObj);
   parentObjArray.shift();
-  Logger.log('Parent data retrieved!');
+  Logger.log('Parent data retrieved...returning array of parent objects.');
   return parentObjArray;
 }
 
@@ -166,14 +185,41 @@ function storeParentInfoToSheet_(parentObj) {
   Logger.log('Parent data stored!');
 }
 
+function populateParentNameDropdown_(myForm, parents) {
+  Logger.log('Populating parent name dropdown list...');
+  var parentNameDropdownItem = findItem_(myForm, 'Select your name').asListItem();
+  var parentNames = ['I can\'t find my name!'];
+  var length = parents.length;
+  for(var i = 0; i < length; i++) {
+    parentNames.push(parents[i].name);
+  }
+  parentNameDropdownItem.setChoiceValues(parentNames);
+  Logger.log('Parent name dropdown list populated.');
+}
+
+function resetForm_(myForm) {
+  Logger.log('Resetting form...');
+  findItem_(myForm, 'Select your name').asListItem().setChoiceValues(['EVERYONE\'S SIGNED OUT!']);
+}
+
+function dailySetup() {
+  Logger.log('Retrieving form...');
+  var form = FormApp.openByUrl('https://docs.google.com/forms/d/1hVcxzDQ1QR2_y2v6JoldWZ90GtQS986UU4WE9qcOboA/edit');
+  var items = form.getItems();
+  var myForm = getFormObject_(form, items, getTitleArray_(items), form.getResponses().pop() || null);
+  Logger.log('Form object created.');
+  resetForm_(myForm);
+  populateParentNameDropdown_(myForm, getParentInfoFromSheet_());
+}
+
 function processSubmit() {
   Logger.log('Retrieving form...');
   var form = FormApp.openByUrl('https://docs.google.com/forms/d/1hVcxzDQ1QR2_y2v6JoldWZ90GtQS986UU4WE9qcOboA/edit');
   var items = form.getItems();
-  var titles = getTitleArray_(items);
-  var myForm = getFormObject_(form, items, titles, form.getResponses().pop());
+  var myForm = getFormObject_(form, items, getTitleArray_(items), form.getResponses().pop());
   Logger.log('Form object created.');
   var parents = getParentInfoFromSheet_();
+  
 }
 
 
