@@ -30,13 +30,16 @@ var jeromyObj = {
   newVisitor: 0,
 };
 
-function getFormObject_(form, items, titles, response) {
+function getFormObject_(form, portal, items, portalItems, titles, portalTitles, response) {
   Logger.log('Creating form object...');
   try {
     return {
       form: form,
+      teacherPortal: portal,
       items: items,
+      portalItems: portalItems,
       titles: titles,
+      portalTitles: portalTitles,
       response: response
     };
   } catch(e) {
@@ -45,10 +48,14 @@ function getFormObject_(form, items, titles, response) {
   }
 }
 
-function findItem_(myForm, searchKey) {
+function findItem_(myForm, searchKey, usePortal) {
   try {
     Logger.log('Returing requested item: ' + searchKey);
-    return myForm.items[myForm.titles.indexOf(searchKey)];
+    if(usePortal){
+      return myForm.portalItems[myForm.portalTitles.indexOf(searchKey)];
+    } else {
+      return myForm.items[myForm.titles.indexOf(searchKey)];
+    }
   } catch (e) {
     Logger.log('ERROR: ' + e.message);
     GmailApp.sendEmail('jcoburn88@outlook.com','Error in findItem_' , ('FIND ITEM ERROR: ' + e.message + '.'));
@@ -124,9 +131,77 @@ function formatPhoneNumber_(phoneNumber) {
   return formattedPhoneNumber;
 }
 
-function signIn_(parentObj) {
-  var date = Utilities.formatDate(new Date(), 'GMT-6', 'YYYY-MM-DD');
-  var signInSheet = SpreadsheetApp.create('');
+function getFolderByName_(folderName) {
+  Logger.log('Looking for folder...');
+  var folderIter = DriveApp.getFoldersByName(folderName);
+  while(folderIter.hasNext()) {
+    var currFolder = folderIter.next();
+    if(currFolder.getName() === folderName) {
+      Logger.log('Folder found!');
+      return currFolder;
+    }
+  }
+  Logger.log('Could not find folder');
+  return -1;
+}
+
+function getFileByName_(fileName) {
+  Logger.log('Looking for file...');
+  var fileIter = DriveApp.getFilesByName(fileName);
+  while(fileIter.hasNext()) {
+    var currFile = fileIter.next();
+    if(currFile.getName() === fileName) {
+      Logger.log('File found!');
+      return currFile;
+    }
+  }
+  Logger.log('Could not find file');
+  return -1;
+}
+
+function addChildrenToForms_(myForm, parentObj) {
+  var length = parentObj.children.length;
+  var callParentItemName;
+  var callParentItem;
+  var choices;
+  for(var i = 0; i < length; i++) {
+    myForm.teacherPortal.addPageBreakItem().setTitle(parentObj.children[i]).setHelpText(parentObj.phoneNumber);
+    callParentItemName = (parentObj.childrenAges[i].split('(')[1].split(')')[0] + ' Children');
+    callParentItem = findItem_(myForm, callParentItemName, true);
+    callParentItem = callParentItem.asMultipleChoiceItem();
+    choices = callParentItem.getChoices();
+    if(choices[0].getValue() === 'EVERYONE\'S SIGNED OUT!'){
+      choices.pop();
+    }
+    choices.push(callParentItem.createChoice(parentObj.children[i]));
+    callParentItem.setChoices(choices);
+  }
+}
+
+function addParentObjectToForm_(myForm, parentObj) {
+  Logger.log('Adding parent object to form...');
+  var signOutItem = findItem_(myForm, 'Parent Name').asListItem();
+  Logger.log('Adding new section');
+  myForm.form.addPageBreakItem().setTitle(parentObj.name + '\'s Child(ren)').setGoToPage(FormApp.PageNavigationType.SUBMIT);
+  Logger.log('Adding new checkbox item');
+  var parentSignOutItem = myForm.form.addCheckboxItem().setTitle('Only *' + parentObj.authorizedAdults.join(' & ') + '* can pick up!').setChoiceValues(parentObj.children);
+  addChildrenToForms_(myForm, parentObj);
+  Logger.log('Populating sign out choices...');
+  var choices = signOutItem.getChoices();
+  if(choices.length === 1 && choices[0].getValue() === 'EVERYONE\'S SIGNED OUT!') {
+    choices.pop();
+  }
+  choices.push(signOutItem.createChoice(parentObj.name));
+  signOutItem.setChoices(choices);
+}
+
+function signIn_(myForm, parentObj) {
+  Logger.log('Signing in...');
+  var date = Utilities.formatDate(new Date(), 'GMT-5', 'YYYY-MM-dd');
+  var signInSheet = getFileByName_(date);
+  storeParentInfoToSheet_(parentObj, SpreadsheetApp.openById(signInSheet.getId()).getActiveSheet());
+  addParentObjectToForm_(myForm, parentObj);
+  Logger.log('Signed in');
 }
 
 function getParentInfoFromSheet_() {
@@ -163,9 +238,7 @@ function getParentInfoFromSheet_() {
   return parentObjArray;
 }
 
-function storeParentInfoToSheet_(parentObj) {
-  Logger.log('Retrieving spreadsheet...');
-  var sheet = SpreadsheetApp.openByUrl('https://docs.google.com/spreadsheets/d/178g7gcZsdIGRUNhPXGugV54qvQmgXaapFV8Dw3qScLU/edit#gid=0').getActiveSheet();
+function storeParentInfoToSheet_(parentObj, sheet) {
   var lastRow = sheet.getLastRow() + 1;
   var lastCol = sheet.getLastColumn();
   Logger.log('Storing parent data...');
@@ -200,26 +273,66 @@ function populateParentNameDropdown_(myForm, parents) {
 function resetForm_(myForm) {
   Logger.log('Resetting form...');
   findItem_(myForm, 'Select your name').asListItem().setChoiceValues(['EVERYONE\'S SIGNED OUT!']);
+  var signOutItem = findItem_(myForm, 'Parent Name').asListItem();
+  signOutItem.setChoiceValues(['EVERYONE\'S SIGNED OUT!']);
+  var lastIndex = signOutItem.getIndex();
+  var length = myForm.items.length;
+  Logger.log('last index: ' + lastIndex);
+  for(var i = length - 1; i > lastIndex; i--) {
+    Logger.log('deleting index: ' + i);
+    myForm.form.deleteItem(i);
+  }
+  findItem_(myForm, 'Beelievers Children', true).asMultipleChoiceItem().setChoiceValues(['EVERYONE\'S SIGNED OUT!']);
+  findItem_(myForm, 'Little Buddies Children', true).asMultipleChoiceItem().setChoiceValues(['EVERYONE\'S SIGNED OUT!']);
+  findItem_(myForm, 'Little Oaks Children', true).asMultipleChoiceItem().setChoiceValues(['EVERYONE\'S SIGNED OUT!']);
+  var fusionItem = findItem_(myForm, 'Fusion Children', true).asMultipleChoiceItem();
+  fusionItem.setChoiceValues(['EVERYONE\'S SIGNED OUT!']);
+  lastIndex = fusionItem.getIndex();
+  length = myForm.portalItems.length;
+  for(var i = length - 1; i > lastIndex; i--) {
+    Logger.log('deleting portal index: ' + i);
+    myForm.teacherPortal.deleteItem(i);
+  }
 }
 
 function dailySetup() {
   Logger.log('Retrieving form...');
   var form = FormApp.openByUrl('https://docs.google.com/forms/d/1hVcxzDQ1QR2_y2v6JoldWZ90GtQS986UU4WE9qcOboA/edit');
+  var portal = FormApp.openByUrl('https://docs.google.com/forms/d/1bxGnpQYwlMZYGkPKstjHJe3lZolTFH1k-TyV_Hgyu2M/edit');
   var items = form.getItems();
-  var myForm = getFormObject_(form, items, getTitleArray_(items), form.getResponses().pop() || null);
+  var portalItems = portal.getItems();
+  var myForm = getFormObject_(form, portal, items, portalItems, getTitleArray_(items), getTitleArray_(portalItems), form.getResponses().pop() || null);
   Logger.log('Form object created.');
   resetForm_(myForm);
   populateParentNameDropdown_(myForm, getParentInfoFromSheet_());
+  var date = Utilities.formatDate(new Date(), 'GMT-5', 'YYYY-MM-dd');
+  var fileIter = DriveApp.getFilesByName(date);
+  var exists = false;
+  while(fileIter.hasNext()){
+    var nextFile = fileIter.next();
+    if(nextFile.getName() === date){
+      exists = true;
+      break;
+    }
+  }
+  if(!exists){
+    SpreadsheetApp.create(date);
+  }
+//  DriveApp.getFileById(origFile.getId()).makeCopy(date, getFolderByName_('SignInSheets'));
+//  DriveApp.removeFile(DriveApp.getFileById(origFile.getId()));
 }
 
 function processSubmit() {
   Logger.log('Retrieving form...');
   var form = FormApp.openByUrl('https://docs.google.com/forms/d/1hVcxzDQ1QR2_y2v6JoldWZ90GtQS986UU4WE9qcOboA/edit');
+  var portal = FormApp.openByUrl('https://docs.google.com/forms/d/1bxGnpQYwlMZYGkPKstjHJe3lZolTFH1k-TyV_Hgyu2M/edit');
   var items = form.getItems();
-  var myForm = getFormObject_(form, items, getTitleArray_(items), form.getResponses().pop());
+  var portalItems = portal.getItems();
+  var myForm = getFormObject_(form, portal, items, portalItems, getTitleArray_(items), getTitleArray_(portalItems), form.getResponses().pop());
   Logger.log('Form object created.');
   var parents = getParentInfoFromSheet_();
   
+  signIn_(myForm, parents[parents.length - 1]);
 }
 
 
