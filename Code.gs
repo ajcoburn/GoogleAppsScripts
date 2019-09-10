@@ -10,6 +10,16 @@ function getNewParentObject_() {
   };
 }
 
+var childSignInItemTitleArray = [
+  'First Child\'s Name','Second Child\'s Name','Third Child\'s Name','Fourth Child\'s Name','Fifth Child\'s Name',
+  'Sixth Child\'s Name','Seventh Child\'s Name','Eighth Child\'s Name','Ninth Child\'s Name','Tenth Child\'s Name'
+];
+
+var childSignInAgeItemTitleArray = [
+  'First Child\'s Age Group','Second Child\'s Age Group','Third Child\'s Age Group','Fourth Child\'s Age Group','Fifth Child\'s Age Group',
+  'Sixth Child\'s Age Group','Seventh Child\'s Age Group','Eighth Child\'s Age Group','Ninth Child\'s Age Group','Tenth Child\'s Age Group'
+];
+
 var kristenObj = {
   name: 'Kristen Miller',
   address: '3405 River Oaks Dr.',
@@ -30,7 +40,7 @@ var jeromyObj = {
   newVisitor: 0,
 };
 
-function getFormObject_(form, portal, items, portalItems, titles, portalTitles, response) {
+function getFormObject_(form, portal, items, portalItems, titles, portalTitles, response, sheet) {
   Logger.log('Creating form object...');
   try {
     return {
@@ -40,7 +50,8 @@ function getFormObject_(form, portal, items, portalItems, titles, portalTitles, 
       portalItems: portalItems,
       titles: titles,
       portalTitles: portalTitles,
-      response: response
+      response: response,
+      sheet: sheet
     };
   } catch(e) {
     Logger.error(e)
@@ -204,9 +215,48 @@ function signIn_(myForm, parentObj) {
   Logger.log('Signed in');
 }
 
-function getParentInfoFromSheet_() {
+function getNewParentChildAgeObject_(myForm){
+  Logger.log('Retrieving childrens names and ages...');
+  var childNameAgeObject = {
+    children: [],
+    ages: [],
+  };
+  var childNameResponse;
+  var childAgeResponse;
+  var childInfoIndex = 0;
+  do {
+    childNameResponse = myForm.response.getResponseForItem(findItem_(myForm, childSignInItemTitleArray[childInfoIndex])).getResponse();
+    childAgeResponse = myForm.response.getResponseForItem(findItem_(myForm, childSignInAgeItemTitleArray[childInfoIndex])).getResponse();
+    childNameAgeObject.children.push(childNameResponse);
+    childNameAgeObject.ages.push(childAgeResponse);
+  } while ((childNameResponse !== null) && (childAgeResponse !== null));
+  Logger.log('Returning children names and ages: ' + childNameAgeObject);
+  return childNameAgeObject;
+}
+
+function getAuthorizedAdults_(myForm){
+  const authorizedAdults = myForm.response.getResponseForItem(findItem_(myForm, 'Adults other than you who can pick up your child(ren)')).getResponse().split(',');
+  Logger.log('Got Authorized Adults: ' + authorizedAdults);
+  return authorizedAdults;
+}
+
+function getParentInfoFromForm_(myForm, newParentItemResponse) {
+  var newParentObj = getNewParentObject_();
+  newParentObj.name = newParentItemResponse;
+  newParentObj.phoneNumber = myForm.response.getResponseForItem(findItem_(myForm, 'Your Phone Number')).getResponse();
+  newParentObj.address = myForm.response.getResponseForItem(findItem_(myForm, 'Your Address')).getResponse() || null;
+  const childAgeObject = getNewParentChildAgeObject_(myForm);
+  newParentObj.children = childAgeObject.children;
+  newParentObj.childrenAges = childAgeObject.ages;
+  newParentObj.authorizedAdults = getAuthorizedAdults_().push(newParentItemResponse);
+  newParentObj.newVisitor = true;
+  
+  return newParentObj;
+}
+
+function getParentInfoFromSheet_(spreadSheet) {
   Logger.log('Retrieving spreadsheet...');
-  var sheet = SpreadsheetApp.openByUrl('https://docs.google.com/spreadsheets/d/178g7gcZsdIGRUNhPXGugV54qvQmgXaapFV8Dw3qScLU/edit#gid=0').getActiveSheet();
+  var sheet = spreadSheet.getActiveSheet();
   var lastRow = sheet.getLastRow();
   var lastCol = sheet.getLastColumn();
   var parentObj = {};
@@ -261,13 +311,33 @@ function storeParentInfoToSheet_(parentObj, sheet) {
 function populateParentNameDropdown_(myForm, parents) {
   Logger.log('Populating parent name dropdown list...');
   var parentNameDropdownItem = findItem_(myForm, 'Select your name').asListItem();
-  var parentNames = ['I can\'t find my name!'];
+  var parentNameChoices = [];
+  var newMultChoiceItem;
+  var newChildSignInChoice;
   var length = parents.length;
   for(var i = 0; i < length; i++) {
-    parentNames.push(parents[i].name);
+    newChildSignInChoice = parentNameDropdownItem.createChoice(parents[i].name, myForm.form.addPageBreakItem()
+                                        .setTitle(parents[i].name + '\'s Children to sign in')
+                                        .setGoToPage(FormApp.PageNavigationType.SUBMIT));
+    newMultChoiceItem = myForm.form.addMultipleChoiceItem()
+    .setTitle('Sign in all ' + parents[i].name + '\'s children?')
+    .setChoiceValues(parents[i].children);
+    parentNameChoices.push(newChildSignInChoice);
   }
-  parentNameDropdownItem.setChoiceValues(parentNames);
+  parentNameDropdownItem.setChoices(parentNameChoices);
   Logger.log('Parent name dropdown list populated.');
+}
+
+function reset() {
+  Logger.log('Retrieving form...');
+  var form = FormApp.openByUrl('https://docs.google.com/forms/d/1hVcxzDQ1QR2_y2v6JoldWZ90GtQS986UU4WE9qcOboA/edit');
+  var portal = FormApp.openByUrl('https://docs.google.com/forms/d/1bxGnpQYwlMZYGkPKstjHJe3lZolTFH1k-TyV_Hgyu2M/edit');
+  var items = form.getItems();
+  var portalItems = portal.getItems();
+  var sheet = SpreadsheetApp.openByUrl('https://docs.google.com/spreadsheets/d/178g7gcZsdIGRUNhPXGugV54qvQmgXaapFV8Dw3qScLU/edit#gid=0');
+  var myForm = getFormObject_(form, portal, items, portalItems, getTitleArray_(items), getTitleArray_(portalItems), form.getResponses().pop() || null, sheet);
+  Logger.log('Form object created.');
+  resetForm_(myForm);
 }
 
 function resetForm_(myForm) {
@@ -301,10 +371,11 @@ function dailySetup() {
   var portal = FormApp.openByUrl('https://docs.google.com/forms/d/1bxGnpQYwlMZYGkPKstjHJe3lZolTFH1k-TyV_Hgyu2M/edit');
   var items = form.getItems();
   var portalItems = portal.getItems();
-  var myForm = getFormObject_(form, portal, items, portalItems, getTitleArray_(items), getTitleArray_(portalItems), form.getResponses().pop() || null);
+  var sheet = SpreadsheetApp.openByUrl('https://docs.google.com/spreadsheets/d/178g7gcZsdIGRUNhPXGugV54qvQmgXaapFV8Dw3qScLU/edit#gid=0');
+  var myForm = getFormObject_(form, portal, items, portalItems, getTitleArray_(items), getTitleArray_(portalItems), form.getResponses().pop() || null, sheet);
   Logger.log('Form object created.');
   resetForm_(myForm);
-  populateParentNameDropdown_(myForm, getParentInfoFromSheet_());
+  populateParentNameDropdown_(myForm, getParentInfoFromSheet_(sheet));
   var date = Utilities.formatDate(new Date(), 'GMT-5', 'YYYY-MM-dd');
   var fileIter = DriveApp.getFilesByName(date);
   var exists = false;
@@ -318,8 +389,6 @@ function dailySetup() {
   if(!exists){
     SpreadsheetApp.create(date);
   }
-//  DriveApp.getFileById(origFile.getId()).makeCopy(date, getFolderByName_('SignInSheets'));
-//  DriveApp.removeFile(DriveApp.getFileById(origFile.getId()));
 }
 
 function processSubmit() {
@@ -328,11 +397,23 @@ function processSubmit() {
   var portal = FormApp.openByUrl('https://docs.google.com/forms/d/1bxGnpQYwlMZYGkPKstjHJe3lZolTFH1k-TyV_Hgyu2M/edit');
   var items = form.getItems();
   var portalItems = portal.getItems();
-  var myForm = getFormObject_(form, portal, items, portalItems, getTitleArray_(items), getTitleArray_(portalItems), form.getResponses().pop());
+  var sheet = SpreadsheetApp.openByUrl('https://docs.google.com/spreadsheets/d/178g7gcZsdIGRUNhPXGugV54qvQmgXaapFV8Dw3qScLU/edit#gid=0');
+  var myForm = getFormObject_(form, portal, items, portalItems, getTitleArray_(items), getTitleArray_(portalItems), form.getResponses().pop(), sheet);
   Logger.log('Form object created.');
-  var parents = getParentInfoFromSheet_();
-  
-  signIn_(myForm, parents[parents.length - 1]);
+  var parents = getParentInfoFromSheet_(sheet);
+  var newParentItemResponse = myForm.response.getResponseForItem(findItem_(myForm, 'Your Name')).getResponse() || null;
+  if(newParentItemResponse) {
+    var newParentObj = getNewParentInfoFromForm(myForm, newParentItemResponse);    
+  } else {
+    Logger.log('New parent response: ' + newParentItemResponse);
+    var savedSelectionResponse = myForm.response.getResponseForItem(findItem_(myForm, 'Select your name')).getResponse();
+    for(var i = 0; i < parents.length; i++) {
+      if(parents[i].name === savedSelectionResponse){
+        signIn_(myForm, parents[i]);
+        break;
+      }
+    }
+  }
 }
 
 
