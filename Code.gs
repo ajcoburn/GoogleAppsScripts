@@ -195,7 +195,7 @@ function addParentObjectToForm_(myForm, parentObj) {
   Logger.log('Adding new section');
   myForm.form.addPageBreakItem().setTitle(parentObj.name + '\'s Child(ren)').setGoToPage(FormApp.PageNavigationType.SUBMIT);
   Logger.log('Adding new checkbox item');
-  var parentSignOutItem = myForm.form.addCheckboxItem().setTitle('Only *' + parentObj.authorizedAdults.join(' & ') + '* can pick up!').setChoiceValues(parentObj.children);
+  var parentSignOutItem = myForm.form.addCheckboxItem().setTitle('Only *' + parentObj.authorizedAdults + '* can pick up!').setChoiceValues(parentObj.children);
   addChildrenToForms_(myForm, parentObj);
   Logger.log('Populating sign out choices...');
   var choices = signOutItem.getChoices();
@@ -224,31 +224,58 @@ function getNewParentChildAgeObject_(myForm){
   var childNameResponse;
   var childAgeResponse;
   var childInfoIndex = 0;
-  do {
-    childNameResponse = myForm.response.getResponseForItem(findItem_(myForm, childSignInItemTitleArray[childInfoIndex])).getResponse();
-    childAgeResponse = myForm.response.getResponseForItem(findItem_(myForm, childSignInAgeItemTitleArray[childInfoIndex])).getResponse();
+  var childNameResponseForItem = true;
+  var childAgeResponseForItem;
+  childNameResponse = myForm.response.getResponseForItem(findItem_(myForm, childSignInItemTitleArray[childInfoIndex])).getResponse();
+  childAgeResponse = myForm.response.getResponseForItem(findItem_(myForm, childSignInAgeItemTitleArray[childInfoIndex])).getResponse();
+  while(childNameResponse != null || childNameResponse != undefined) {
+    Logger.log('CHILD NAME RESPONSE: ' + childNameResponse);
+    childInfoIndex += 1;
     childNameAgeObject.children.push(childNameResponse);
     childNameAgeObject.ages.push(childAgeResponse);
-  } while ((childNameResponse !== null) && (childAgeResponse !== null));
-  Logger.log('Returning children names and ages: ' + childNameAgeObject);
+    childNameResponseForItem = myForm.response.getResponseForItem(findItem_(myForm, childSignInItemTitleArray[childInfoIndex]));
+    childAgeResponseForItem = myForm.response.getResponseForItem(findItem_(myForm, childSignInAgeItemTitleArray[childInfoIndex]));
+    if (childNameResponseForItem === null || childNameResponseForItem === undefined || childNameResponseForItem === '' || childAgeResponseForItem === null || childAgeResponseForItem === undefined) {
+      Logger.log('Cought null');
+      break;
+    }
+    childNameResponse = childNameResponseForItem.getResponse();
+    childAgeResponse = childAgeResponseForItem.getResponse();
+  };
+//  while (childNameResponseForItem != null){
+//    Logger.log('CHILD NAME RESPONSE: ' + childNameResponse);
+//    childInfoIndex += 1;
+//    childNameAgeObject.children.push(childNameResponse);
+//    childNameAgeObject.ages.push(childAgeResponse);
+//    childNameResponseForItem = myForm.response.getResponseForItem(findItem_(myForm, childSignInItemTitleArray[childInfoIndex]));
+//    childAgeResponseForItem = myForm.response.getResponseForItem(findItem_(myForm, childSignInAgeItemTitleArray[childInfoIndex]));
+//    if(childNameResponseForItem && childAgeResponseForItem){
+//      childNameResponse = childNameResponseForItem.getResponse();
+//      childAgeResponse = childAgeResponseForItem.getResponse();
+//    }
+//  };
+  Logger.log('Returning children names and ages: ' + childNameAgeObject.children);
   return childNameAgeObject;
 }
 
-function getAuthorizedAdults_(myForm){
+function getAuthorizedAdults_(myForm, parentName){
   const authorizedAdults = myForm.response.getResponseForItem(findItem_(myForm, 'Adults other than you who can pick up your child(ren)')).getResponse().split(',');
+  authorizedAdults.push(parentName);
   Logger.log('Got Authorized Adults: ' + authorizedAdults);
   return authorizedAdults;
 }
 
-function getParentInfoFromForm_(myForm, newParentItemResponse) {
+function getNewParentInfoFromForm_(myForm, newParentItemResponse) {
+  Logger.log('Obtaining parent info from form');
   var newParentObj = getNewParentObject_();
   newParentObj.name = newParentItemResponse;
+  Logger.log('Got parent name: ' + newParentItemResponse);
   newParentObj.phoneNumber = myForm.response.getResponseForItem(findItem_(myForm, 'Your Phone Number')).getResponse();
   newParentObj.address = myForm.response.getResponseForItem(findItem_(myForm, 'Your Address')).getResponse() || null;
   const childAgeObject = getNewParentChildAgeObject_(myForm);
   newParentObj.children = childAgeObject.children;
   newParentObj.childrenAges = childAgeObject.ages;
-  newParentObj.authorizedAdults = getAuthorizedAdults_().push(newParentItemResponse);
+  newParentObj.authorizedAdults = getAuthorizedAdults_(myForm, newParentItemResponse);
   newParentObj.newVisitor = true;
   
   return newParentObj;
@@ -403,7 +430,8 @@ function processSubmit() {
   var parents = getParentInfoFromSheet_(sheet);
   var newParentItemResponse = myForm.response.getResponseForItem(findItem_(myForm, 'Your Name')).getResponse() || null;
   if(newParentItemResponse) {
-    var newParentObj = getNewParentInfoFromForm(myForm, newParentItemResponse);    
+    var newParentObj = getNewParentInfoFromForm_(myForm, newParentItemResponse);
+    signIn_(myForm, newParentObj);
   } else {
     Logger.log('New parent response: ' + newParentItemResponse);
     var savedSelectionResponse = myForm.response.getResponseForItem(findItem_(myForm, 'Select your name')).getResponse();
